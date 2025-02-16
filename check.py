@@ -359,9 +359,14 @@ def admin_page():
                 else:
                     st.error("Deletion failed")
 
-# ======================
-# User Interface
-# ======================
+# Add this function to handle description updates
+def update_file_description(semester, subject, filename, description):
+    """Update description for a specific file"""
+    descriptions = get_descriptions(semester, subject)
+    descriptions[filename] = description
+    return save_descriptions(semester, subject, descriptions)
+
+# Modified default page section
 def default_page():
     st.title("Study Materials Repository")
     
@@ -396,15 +401,24 @@ def default_page():
         
     st.subheader("Available Files")
     for file in files:
-        with st.expander(file):
-            st.caption(descriptions.get(file, "No description available"))
-            download_url = f"https://raw.githubusercontent.com/{GITHUB_REPO}/main/{GITHUB_PATH}/{selected_sem}/{selected_sub}/{file}"
-            st.download_button(
-                label="Download File",
-                data=requests.get(download_url).content,
-                file_name=file
-            )
-
+        # File name
+        st.markdown(f"**{file}**")
+        
+        # Description
+        desc = descriptions.get(file, "No description available")
+        st.caption(desc)
+        
+        # Download button
+        download_url = f"https://raw.githubusercontent.com/{GITHUB_REPO}/main/{GITHUB_PATH}/{selected_sem}/{selected_sub}/{file}"
+        st.download_button(
+            label="Download File",
+            data=requests.get(download_url).content,
+            file_name=file,
+            key=f"dl_{file}"
+        )
+        
+        # Separator line
+        st.markdown("---")
 # ======================
 # Main App
 # ======================

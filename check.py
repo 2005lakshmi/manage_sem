@@ -11,7 +11,6 @@ GITHUB_REPO = "2005lakshmi/mitmpp1"  # Update with your repo
 GITHUB_PATH = "SEM"  # Root folder
 PASSWORD = st.secrets["general"]["password"]
 
-# Helper functions
 def create_folder(path):
     """Create folder with null.txt at given path"""
     file_url = f"https://api.github.com/repos/{GITHUB_REPO}/contents/{path}/null.txt"
@@ -26,43 +25,69 @@ def get_folders(path):
     url = f"https://api.github.com/repos/{GITHUB_REPO}/contents/{path}"
     headers = {"Authorization": f"token {GITHUB_TOKEN}"}
     response = requests.get(url, headers=headers)
-    return [item['name'] for item in response.json() if item['type'] == "dir"] if response.status_code == 200 else []
+    if response.status_code == 200:
+        return [item['name'] for item in response.json() if item['type'] == "dir"]
+    return []
 
 def get_files(path):
     """Get list of files in given path"""
     url = f"https://api.github.com/repos/{GITHUB_REPO}/contents/{path}"
     headers = {"Authorization": f"token {GITHUB_TOKEN}"}
     response = requests.get(url, headers=headers)
-    return [item['name'] for item in response.json() if item['type'] == "file"] if response.status_code == 200 else []
+    if response.status_code == 200:
+        return [item['name'] for item in response.json() if item['type'] == "file"]
+    return []
 
-def delete_path(path):
-    """Delete file/folder recursively"""
+def delete_item(path):
+    """Delete file or folder recursively with proper SHA handling"""
     url = f"https://api.github.com/repos/{GITHUB_REPO}/contents/{path}"
     headers = {"Authorization": f"token {GITHUB_TOKEN}"}
     
-    # Get existing items
+    # Check if path is file or folder
     response = requests.get(url, headers=headers)
     if response.status_code != 200:
         return False
     
     items = response.json()
     if not isinstance(items, list):  # Single file
-        items = [items]
+        sha = items['sha']
+        response = requests.delete(url, headers=headers, json={
+            "message": f"Delete {path}",
+            "sha": sha
+        })
+        return response.status_code == 200
     
-    # Delete all contents first
+    # Delete folder contents recursively
     for item in items:
         if item['type'] == 'dir':
-            delete_path(item['path'])
+            delete_item(item['path'])
         else:
-            requests.delete(url + f"/{item['name']}", 
-                          headers=headers,
-                          json={"message": f"Delete {item['name']}", "sha": item['sha']})
+            delete_item(item['path'])
     
-    # Delete folder itself if empty
-    if len(items) > 0 and items[0]['type'] == 'dir':
-        response = requests.delete(url, headers=headers, 
-                                 json={"message": f"Delete {path}", "sha": items[0]['sha']})
-    return response.status_code == 200
+    return True
+
+def rename_file(old_path, new_name):
+    """Rename file by creating copy and deleting original"""
+    # Get file content
+    content = requests.get(f"https://raw.githubusercontent.com/{GITHUB_REPO}/main/{old_path}").content
+    encoded = base64.b64encode(content).decode()
+    
+    # Create new path
+    new_path = os.path.join(os.path.dirname(old_path), new_name)
+    
+    # Create new file
+    url = f"https://api.github.com/repos/{GITHUB_REPO}/contents/{new_path}"
+    response = requests.put(url,
+                          headers={"Authorization": f"token {GITHUB_TOKEN}"},
+                          json={
+                              "message": f"Rename {os.path.basename(old_path)} to {new_name}",
+                              "content": encoded
+                          })
+    
+    if response.status_code == 201:
+        # Delete old file
+        return delete_item(old_path)
+    return False
 
 # Admin Page Functions
 def admin_page():
@@ -88,9 +113,9 @@ def admin_page():
 
     with st.expander("Upload Files"):
         semesters = get_folders(GITHUB_PATH)
-        selected_sem = st.selectbox("Choose Semester", semesters)
+        selected_sem = st.selectbox("Choose Semester", semesters, key="upload_sem")
         subjects = get_folders(f"{GITHUB_PATH}/{selected_sem}")
-        selected_subject = st.selectbox("Choose Subject", subjects)
+        selected_subject = st.selectbox("Choose Subject", subjects, key="upload_sub")
         
         uploaded_files = st.file_uploader("Choose files", accept_multiple_files=True)
         if uploaded_files:
@@ -104,22 +129,32 @@ def admin_page():
                 if response.status_code == 201:
                     st.success(f"Uploaded {file.name}!")
                 else:
-                    st.error(f"Failed to upload {file.name}")
+                    st.error(f"Failed to upload {file.name}: {response.json().get('message', '')}")
 
     with st.expander("Manage Files"):
         semesters = get_folders(GITHUB_PATH)
         selected_sem = st.selectbox("Select Semester", semesters, key="manage_sem")
         subjects = get_folders(f"{GITHUB_PATH}/{selected_sem}")
-        selected_subject = st.selectbox("Select Subject", subjects, key="manage_subject")
+        selected_subject = st.selectbox("Select Subject", subjects, key="manage_sub")
         
         files = get_files(f"{GITHUB_PATH}/{selected_sem}/{selected_subject}")
         for file in files:
-            col1, col2 = st.columns([3,1])
+            col1, col2, col3 = st.columns([3, 2, 1])
             with col1:
                 st.write(file)
             with col2:
-                if st.button(f"Delete {file}", key=f"del_{file}"):
-                    if delete_path(f"{GITHUB_PATH}/{selected_sem}/{selected_subject}/{file}"):
+                new_name = st.text_input(f"New name for {file}", key=f"rename_{file}")
+            with col3:
+                if st.button(f"Rename", key=f"rename_btn_{file}"):
+                    if new_name and new_name != file:
+                        old_path = f"{GITHUB_PATH}/{selected_sem}/{selected_subject}/{file}"
+                        if rename_file(old_path, new_name):
+                            st.success("Renamed!")
+                            st.rerun()
+                        else:
+                            st.error("Rename failed")
+                if st.button(f"Delete", key=f"del_{file}"):
+                    if delete_item(f"{GITHUB_PATH}/{selected_sem}/{selected_subject}/{file}"):
                         st.success("Deleted!")
                         st.rerun()
                     else:
@@ -129,17 +164,17 @@ def admin_page():
         semesters = get_folders(GITHUB_PATH)
         selected_sem = st.selectbox("Select Semester", semesters, key="del_sem")
         subjects = get_folders(f"{GITHUB_PATH}/{selected_sem}")
-        selected_subject = st.selectbox("Select Subject", subjects, key="del_subject")
+        selected_subject = st.selectbox("Select Subject", subjects, key="del_sub")
         
         if st.button("Delete Subject Folder"):
-            if delete_path(f"{GITHUB_PATH}/{selected_sem}/{selected_subject}"):
+            if delete_item(f"{GITHUB_PATH}/{selected_sem}/{selected_subject}"):
                 st.success("Deleted subject folder!")
                 st.rerun()
             else:
                 st.error("Delete failed")
         
         if st.button("Delete Semester Folder"):
-            if delete_path(f"{GITHUB_PATH}/{selected_sem}"):
+            if delete_item(f"{GITHUB_PATH}/{selected_sem}"):
                 st.success("Deleted semester folder!")
                 st.rerun()
             else:
@@ -154,16 +189,14 @@ def default_page():
     if search_query == PASSWORD:
         st.session_state.admin = True
         st.rerun()
-    elif search_query:
-        st.info("No matching folders found")
     
     # Folder navigation
     semesters = get_folders(GITHUB_PATH)
     if semesters:
-        selected_sem = st.selectbox("Select Semester", semesters)
+        selected_sem = st.selectbox("Select Semester", semesters, key="user_sem")
         subjects = get_folders(f"{GITHUB_PATH}/{selected_sem}")
         if subjects:
-            selected_subject = st.selectbox("Select Subject", subjects)
+            selected_subject = st.selectbox("Select Subject", subjects, key="user_sub")
             files = get_files(f"{GITHUB_PATH}/{selected_sem}/{selected_subject}")
             
             if files:

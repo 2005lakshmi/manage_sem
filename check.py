@@ -180,7 +180,7 @@ def admin_page():
             else:
                 st.error("Delete failed")
 
-# Default User Page
+# Updated Default Page with Radio Buttons
 def default_page():
     st.title("Study Materials Repository")
     
@@ -190,15 +190,31 @@ def default_page():
         st.session_state.admin = True
         st.rerun()
     
-    # Folder navigation
+    # Folder navigation with radio buttons
     semesters = get_folders(GITHUB_PATH)
     if semesters:
-        selected_sem = st.selectbox("Select Semester", semesters, key="user_sem")
+        st.markdown("---")
+        st.subheader("Select Semester")
+        selected_sem = st.radio(
+            "Available Semesters:",
+            semesters,
+            key="user_sem",
+            index=0
+        )
+        
+        st.markdown("---")
         subjects = get_folders(f"{GITHUB_PATH}/{selected_sem}")
         if subjects:
-            selected_subject = st.selectbox("Select Subject", subjects, key="user_sub")
-            files = get_files(f"{GITHUB_PATH}/{selected_sem}/{selected_subject}")
+            st.subheader("Select Subject")
+            selected_subject = st.radio(
+                "Available Subjects:",
+                subjects,
+                key="user_sub",
+                index=0
+            )
             
+            st.markdown("---")
+            files = get_files(f"{GITHUB_PATH}/{selected_sem}/{selected_subject}")
             if files:
                 st.subheader("Available Files:")
                 for file in files:
@@ -209,11 +225,11 @@ def default_page():
                         file_name=file
                     )
             else:
-                st.info("No files available in this subject")
+                st.info("📭 No files available in this subject")
         else:
-            st.info("No subjects available in this semester")
+            st.info("📚 No subjects available in this semester")
     else:
-        st.info("No semesters available")
+        st.info("🏫 No semesters available")
 
 # Main App
 def main():
